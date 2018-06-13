@@ -29,13 +29,12 @@ namespace PEHandler
 
         public PEFile(Stream src, uint expectedTex)
         {
+            Sections = new List<Section>();
             src.Position = 0;
             earlyHeader = new byte[expectedTex];
             src.Read(earlyHeader, 0, (int)expectedTex);
-            earlyHeaderMS = new MemoryStream(earlyHeader)
-            {
-                Position = NtHeaders
-            };
+            earlyHeaderMS = new MemoryStream(earlyHeader);
+            earlyHeaderMS.Position = NtHeaders;
             if (earlyHeaderMS.ReadInt() != 0x00004550)
                 throw new IOException("Not a valid PE file.");
             earlyHeaderMS.Position += 2; // short: machine
@@ -60,7 +59,11 @@ namespace PEHandler
             src.Position = optHeadPoint + optHeadSize;
             for (uint i = 0; i < sectionCount; i++)
             {
+                Section s = new Section();
+                s.Read(src);
+                Sections.Add(s);
             }
+            Test(true);
         }
 
         private int Test(bool justOrderAndOverlap)
@@ -547,7 +550,7 @@ namespace PEHandler
                 Characteristics = SectionFlags.CNT_INITIALIZED_DATA | SectionFlags.MEM_EXECUTE | SectionFlags.MEM_READ | SectionFlags.MEM_WRITE;
             }
 
-            public void Read(MemoryStream src)
+            public void Read(Stream src)
             {
                 src.Read(tagData, 0, 8);
                 VirtualSize = src.ReadInt();
@@ -641,7 +644,9 @@ namespace PEHandler
                 ShiftDirTable(new MemoryStream(RawData), amt, 0);
             }
 
-            public override string ToString() => $"{Tag} : RVA {VirtualAddrRelative:X} : VS {VirtualSize:X} : RDS {RawData.Length} : CH {Characteristics}";
+            public override string ToString() => Tag;
+
+            public string ToStringDetailed() => $"{Tag} : RVA {VirtualAddrRelative:X} : VS {VirtualSize:X} : RDS {RawData.Length} : CH {Characteristics}";
         }
 
         public static uint UCompare(uint a)

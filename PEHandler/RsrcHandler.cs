@@ -131,44 +131,44 @@ namespace PEHandler
             }
         }
 
-        private RsrcEntry root;
+        public RsrcEntry Root { get; private set; }
 
         public RsrcEntry AddEntry(string name)
         {
-            return root.AddSubEntry(name);
+            return Root.AddSubEntry(name);
         }
 
         public RsrcEntry AddEntry(uint id)
         {
-            return root.AddSubEntry(id);
+            return Root.AddSubEntry(id);
         }
 
         public RsrcEntry GetEntry(string name)
         {
-            return root.GetSubEntry(name);
+            return Root.GetSubEntry(name);
         }
 
         public bool HasEntry(string name)
         {
-            return root.HasSubEntry(name);
+            return Root.HasSubEntry(name);
         }
 
         public RsrcEntry GetEntry(uint id)
         {
-            return root.GetSubEntry(id);
+            return Root.GetSubEntry(id);
         }
 
         public bool HasEntry(uint id)
         {
-            return root.HasSubEntry(id);
+            return Root.HasSubEntry(id);
         }
 
         public RsrcEntry GetEntryFromPath(String path)
         {
             path = path.Trim();
             if (path.Length == 0)
-                return root;
-            RsrcEntry entry = root;
+                return Root;
+            RsrcEntry entry = Root;
             string[] pathParts = path.Split('/');
             string donePath = "";
             for (int i = 0; i < pathParts.Length; i++)
@@ -199,12 +199,12 @@ namespace PEHandler
                 throw new ArgumentException("srcFile does not have a .rsrc section!");
             Section rsrcSec = srcFile.Sections.ElementAt(rsI);
             rsrcSec.ShiftResourceContents((int)-rsrcSec.VirtualAddrRelative);
-            root = new RsrcEntry(null)
+            Root = new RsrcEntry(null)
             {
                 Entries = new List<RsrcEntry>()
             };
             MemoryStream src = new MemoryStream(rsrcSec.RawData);
-            ReadDirectory(src, root);
+            ReadDirectory(src, Root);
             src.Dispose();
             rsrcSec.ShiftResourceContents((int)rsrcSec.VirtualAddrRelative);
         }
@@ -217,12 +217,12 @@ namespace PEHandler
             Section rsrcSec = dstFile.Sections.ElementAt(rsI);
             dstFile.Sections.RemoveAt(rsI);
             // 0th romp to calculate section sizes
-            SectionSizes sectionSizes = CalculateSectionSizes(root);
+            SectionSizes sectionSizes = CalculateSectionSizes(Root);
             byte[] dstBuf = new byte[sectionSizes.totalSize];
             MemoryStream dst = new MemoryStream(dstBuf);
             ReferenceMemory refMem = new ReferenceMemory();
             // write directories, leave references blank
-            WriteDirectory(dst, root, refMem);
+            WriteDirectory(dst, Root, refMem);
             // write references
             WriteReferences(dst, sectionSizes, refMem);
             rsrcSec.RawData = dstBuf;
