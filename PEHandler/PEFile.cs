@@ -556,10 +556,10 @@ namespace PEHandler
                 VirtualSize = src.ReadInt();
                 VirtualAddrRelative = src.ReadInt();
                 RawData = new byte[src.ReadInt()];
-                uint rawDataPointer = src.ReadInt();
-                MetaLinearize = rawDataPointer == VirtualAddrRelative;
+                FileAddress = src.ReadInt();
+                MetaLinearize = FileAddress == VirtualAddrRelative;
                 long saved = src.Position;
-                src.Position = rawDataPointer;
+                src.Position = FileAddress;
                 src.Read(RawData, 0, RawData.Length);
                 src.Position = saved;
                 src.Position += 8; // int 1: unknown, int 2: unknown
