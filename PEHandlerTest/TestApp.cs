@@ -69,7 +69,7 @@ namespace PEHandlerTest
                 panelWidth = panel.Size.Width;
                 AddLabel(controls, $"Tag: {selSec.Tag}");
                 AddLabel(controls, $"Linearized: {(selSec.MetaLinearize ? "Yes" : "No")}");
-                AddLabel(controls, $"Virtual Address: 0x{selSec.VirtualAddrRelative.ToString("X8")}");
+                AddLabel(controls, $"Virtual Address: 0x{selSec.VirtualAddress.ToString("X8")}");
                 AddLabel(controls, $"Virtual Size: 0x{selSec.VirtualSize.ToString("X8")}");
                 AddLabel(controls, $"File Address: 0x{selSec.FileAddress.ToString("X8")}");
                 AddLabel(controls, $"File Size: 0x{selSec.RawData.Length.ToString("X8")}");
@@ -90,7 +90,7 @@ namespace PEHandlerTest
             }
             foreach (RsrcEntry entry in rootEntry.Entries)
             {
-                if (entry.IsDirectory())
+                if (entry.IsDirectory)
                     AddNodes(entry, col, entryNode);
                 else
                     entryNode.Nodes.Add(entry.PathName);

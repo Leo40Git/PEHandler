@@ -1,14 +1,10 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace PEHandler
 {
     /// <summary>
-    /// Extension to the Stream class to add methods for reading and writing shorts, integers and longs easily.
+    /// Extension to the <see cref="Stream"/> class to add methods for reading and writing shorts, integers and longs easily.
     /// </summary>
     public static class StreamExtensions
     {
