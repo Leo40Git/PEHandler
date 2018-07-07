@@ -80,7 +80,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\PEHandler\PEHandler.csproj">
-      <Project>{db5f9e3c-9f86-47d8-952f-834016fbeb4c}</Project>
+      <Project>{f94646ac-1870-4901-b93d-afc43a42e475}</Project>
       <Name>PEHandler</Name>
     </ProjectReference>
   </ItemGroup>

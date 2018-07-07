@@ -31,7 +31,7 @@ namespace PEHandlerTest
                 Stream s = openFileDialog.OpenFile();
                 peData = new PEFile(s, 0x1000);
                 s.Dispose();
-                rsrcHandler = new RsrcHandler(peData);
+                rsrcHandler = peData.RsrcHandler;
                 ListBox.ObjectCollection items = sectionList.Items;
                 items.Clear();
                 foreach (Section sec in peData.Sections)
@@ -49,7 +49,7 @@ namespace PEHandlerTest
             controls.Clear();
             Section selSec = sectionList.SelectedItem as Section;
             int selSecID = peData.Sections.IndexOf(selSec);
-            if (selSecID == peData.GetResourcesIndex())
+            if (selSecID == peData.ResourcesIndex)
             {
                 TreeView treeView = new TreeView
                 {
