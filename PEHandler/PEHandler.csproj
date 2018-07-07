@@ -2,6 +2,11 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <Company>Leo40Git</Company>
+    <Authors>Leo40Git</Authors>
+    <Description>Library to handle EXE files.</Description>
+    <Copyright>Copyright © Leo40Git 2018</Copyright>
   </PropertyGroup>
 
 </Project>
