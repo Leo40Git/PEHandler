@@ -716,7 +716,7 @@ namespace PEHandler
             public bool MetaLinearize { get; set; }
 
             /// <summary>
-            /// The section tag, serialized for writing the section head (<see cref="WriteHead(MemoryStream)"/>).
+            /// The section tag, serialized for writing the section head (<see cref="WriteHead(Stream)"/>).
             /// </summary>
             private byte[] tagData = new byte[8];
 
