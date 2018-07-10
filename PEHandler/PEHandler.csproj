@@ -12,8 +12,9 @@
     <PackageLicenseUrl>https://raw.githubusercontent.com/Leo40Git/PEHandler/master/LICENSE</PackageLicenseUrl>
     <RepositoryUrl>https://github.com/Leo40Git/PEHandler</RepositoryUrl>
     <RepositoryType>GitHub</RepositoryType>
-    <PackageTags>pe exe utility</PackageTags>
+    <PackageTags>pe exe rsrc utility</PackageTags>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <Version>1.0.1</Version>
   </PropertyGroup>
 
 </Project>
