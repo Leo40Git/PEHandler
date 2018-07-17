@@ -124,10 +124,10 @@ namespace PEHandler
             RsrcEntry entry = this;
             while (entry.Parent != null && entry.Parent.Parent != null)
             {
-                path = entry.PathName + "/" + path;
+                path = $"{entry.PathName}/{path}";
                 entry = entry.Parent;
             }
-            return path;
+            return path.Substring(0, path.Length - 1);
         }
 
         /// <summary>
@@ -321,6 +321,67 @@ namespace PEHandler
             ReadDirectory(src, Root);
             src.Dispose();
             rsrcSec.ShiftResourceContents((int)rsrcSec.VirtualAddress);
+            TraceRsrcResults res = TraceRsrc(Root);
+            Trace($"Size of .rsrc section is 0x{rsrcSec.RawData.Length:X} bytes");
+            Trace($"{res.dirCount} directories, {res.datCount} data entries");
+            Trace($"{res.strs.Count} unique strings, 0x{res.strSize:X} bytes in total");
+            Trace($"Total data size is 0x{res.datSize:X} bytes");
+        }
+
+        private struct TraceRsrcResults
+        {
+            public int dirCount;
+            public int datCount;
+            public int datSize;
+            public List<string> strs;
+            public int strSize;
+
+            public static TraceRsrcResults operator +(TraceRsrcResults s1, TraceRsrcResults s2)
+            {
+                TraceRsrcResults res;
+                res.dirCount = s1.dirCount + s2.dirCount;
+                res.datCount = s1.datCount + s2.datCount;
+                res.datSize = s1.datSize + s2.datSize;
+                res.strs = new List<string>(s1.strs);
+                res.strs.AddRange(s2.strs);
+                res.strSize = s1.strSize + s2.strSize;
+                return res;
+            }
+        }
+
+        private TraceRsrcResults TraceRsrc(RsrcEntry root, int indent = 0)
+        {
+            TraceRsrcResults res;
+            res.dirCount = 0;
+            res.datCount = 0;
+            res.datSize = 0;
+            res.strs = new List<string>();
+            res.strSize = 0;
+            string indentStr = new string(' ', indent);
+            foreach (RsrcEntry entry in root.Entries)
+            {
+                Trace($"{indentStr}{(entry.IsDirectory ? "DIR" : "DAT")} {entry.PathName}");
+                if (entry.Name != null)
+                {
+                    if (!res.strs.Contains(entry.Name))
+                    {
+                        res.strs.Add(entry.Name);
+                        res.strSize += 2 + entry.Name.Length * 2;
+                    }
+                }
+                if (entry.IsDirectory)
+                {
+                    res.dirCount++;
+                    res += TraceRsrc(entry, indent + 1);
+                }
+                else
+                {
+                    res.datCount++;
+                    res.datSize += entry.Data.Length;
+                    Trace($"{indentStr} Size is 0x{entry.Data.Length:X} bytes");
+                }
+            }
+            return res;
         }
 
         /// <summary>
@@ -331,6 +392,13 @@ namespace PEHandler
             srcFile.Sections.Remove(rsrcSec);
             // 0th romp to calculate section sizes
             SectionSizes sectionSizes = CalculateSectionSizes(Root);
+            Trace("Calculated .rsrc section sizes are:");
+            Trace($"Directory tables: 0x{sectionSizes.directorySize:X}");
+            Trace($"Data entries: 0x{sectionSizes.dataEntrySize:X}");
+            Trace($"String definitions: 0x{sectionSizes.stringSize:X}");
+            Trace($"Resource data: 0x{sectionSizes.dataSize:X}");
+            Trace($"TOTAL: 0x{sectionSizes.totalSize:X}");
+            Trace("-- END --");
             byte[] dstBuf = new byte[sectionSizes.totalSize];
             MemoryStream dst = new MemoryStream(dstBuf);
             ReferenceMemory refMem = new ReferenceMemory();
@@ -339,7 +407,6 @@ namespace PEHandler
             // write references
             WriteReferences(dst, sectionSizes, refMem);
             rsrcSec.RawData = dstBuf;
-            rsrcSec.VirtualSize = (uint)dstBuf.Length;
             srcFile.Malloc(rsrcSec);
             // update offsets
             uint rsrcSecRVA = rsrcSec.VirtualAddress;
@@ -460,9 +527,9 @@ namespace PEHandler
             {
                 SectionSizes sizes;
                 sizes.directorySize = s1.directorySize + s2.directorySize;
-                sizes.dataEntrySize = s1.totalSize + s2.dataEntrySize;
-                sizes.stringSize = s1.totalSize + s2.stringSize;
-                sizes.dataSize = s1.totalSize + s2.dataSize;
+                sizes.dataEntrySize = s1.dataEntrySize + s2.dataEntrySize;
+                sizes.stringSize = s1.stringSize + s2.stringSize;
+                sizes.dataSize = s1.dataSize + s2.dataSize;
                 sizes.totalSize = sizes.directorySize + sizes.dataEntrySize + sizes.stringSize + sizes.dataSize;
                 return sizes;
             }
@@ -692,8 +759,10 @@ namespace PEHandler
             // write actual data, remember offsets
             Dictionary<RsrcEntry, uint> dataOffsets = new Dictionary<RsrcEntry, uint>();
             dst.Position = sectionSizes.directorySize + sectionSizes.dataEntrySize + sectionSizes.stringSize;
+            Trace($"dst.Length = 0x{dst.Length:X}");
             foreach (KeyValuePair<RsrcEntry, List<uint>> entry in refMem.dataEntryReferences)
             {
+                Trace($"Writing data for entry {entry.Key.ToPath()} at 0x{dst.Position:X} with size 0x{entry.Key.Data.Length:X}, ends at 0x{(dst.Position + entry.Key.Data.Length):X}");
                 dataOffsets.Add(entry.Key, (uint)dst.Position);
                 byte[] data = entry.Key.Data;
                 dst.Write(data, 0, data.Length);
@@ -713,6 +782,7 @@ namespace PEHandler
                 bool ok = dataOffsets.TryGetValue(rsrc, out uint dataPos);
                 if (!ok)
                     throw new Exception("Data is missing offset: " + rsrc.ToPath());
+                Trace($"Writing data entry for entry {entry.Key.ToPath()} at 0x{dst.Position:X}; position is 0x{dataPos:X}, size is 0x{rsrc.Data.Length:X}");
                 dst.WriteInt(dataPos);
                 dst.WriteInt((uint)rsrc.Data.Length);
                 dst.WriteInt(rsrc.DataCodepage);

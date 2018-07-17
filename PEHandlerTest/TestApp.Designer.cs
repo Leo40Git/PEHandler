@@ -32,8 +32,10 @@
             this.menuStrip = new System.Windows.Forms.MenuStrip();
             this.mFile = new System.Windows.Forms.ToolStripMenuItem();
             this.mFileLoadEXE = new System.Windows.Forms.ToolStripMenuItem();
+            this.mFileSaveEXE = new System.Windows.Forms.ToolStripMenuItem();
             this.splitContainer = new System.Windows.Forms.SplitContainer();
             this.sectionList = new System.Windows.Forms.ListBox();
+            this.saveFileDialog = new System.Windows.Forms.SaveFileDialog();
             this.menuStrip.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.splitContainer)).BeginInit();
             this.splitContainer.Panel1.SuspendLayout();
@@ -58,7 +60,8 @@
             // mFile
             // 
             this.mFile.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.mFileLoadEXE});
+            this.mFileLoadEXE,
+            this.mFileSaveEXE});
             this.mFile.Name = "mFile";
             this.mFile.Size = new System.Drawing.Size(37, 20);
             this.mFile.Text = "File";
@@ -66,9 +69,16 @@
             // mFileLoadEXE
             // 
             this.mFileLoadEXE.Name = "mFileLoadEXE";
-            this.mFileLoadEXE.Size = new System.Drawing.Size(122, 22);
+            this.mFileLoadEXE.Size = new System.Drawing.Size(180, 22);
             this.mFileLoadEXE.Text = "Load EXE";
             this.mFileLoadEXE.Click += new System.EventHandler(this.mFileLoadEXE_Click);
+            // 
+            // mFileSaveEXE
+            // 
+            this.mFileSaveEXE.Name = "mFileSaveEXE";
+            this.mFileSaveEXE.Size = new System.Drawing.Size(180, 22);
+            this.mFileSaveEXE.Text = "Save EXE";
+            this.mFileSaveEXE.Click += new System.EventHandler(this.mFileSaveEXE_Click);
             // 
             // splitContainer
             // 
@@ -94,6 +104,11 @@
             this.sectionList.Size = new System.Drawing.Size(266, 426);
             this.sectionList.TabIndex = 0;
             this.sectionList.SelectedIndexChanged += new System.EventHandler(this.sectionList_SelectedIndexChanged);
+            // 
+            // saveFileDialog
+            // 
+            this.saveFileDialog.DefaultExt = "exe";
+            this.saveFileDialog.Filter = "EXE files|*.exe";
             // 
             // TestApp
             // 
@@ -122,6 +137,8 @@
         private System.Windows.Forms.SplitContainer splitContainer;
         private System.Windows.Forms.ListBox sectionList;
         private System.Windows.Forms.ToolStripMenuItem mFileLoadEXE;
+        private System.Windows.Forms.ToolStripMenuItem mFileSaveEXE;
+        private System.Windows.Forms.SaveFileDialog saveFileDialog;
     }
 }
 

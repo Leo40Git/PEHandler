@@ -6,14 +6,15 @@ using System.Windows.Forms;
 
 namespace PEHandlerTest
 {
-    static class Program
+    internal static class Program
     {
         /// <summary>
         /// The main entry point for the application.
         /// </summary>
         [STAThread]
-        static void Main()
+        private static void Main()
         {
+            PEHandler.PEFile.Trace = (string msg) => Console.WriteLine(msg);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new TestApp());

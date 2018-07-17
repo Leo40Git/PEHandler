@@ -11,6 +11,8 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using static PEHandler.PEFile;
 using static PEHandler.RsrcHandler;
+using System.Runtime.InteropServices;
+using System.Diagnostics;
 
 namespace PEHandlerTest
 {
@@ -111,6 +113,17 @@ namespace PEHandlerTest
             Size s = lbl.Size;
             s.Width = panelWidth;
             lbl.Size = s;
+        }
+
+        private void mFileSaveEXE_Click(object sender, EventArgs e)
+        {
+            if (saveFileDialog.ShowDialog(this) == DialogResult.OK)
+            {
+                byte[] data = peData.Write();
+                Stream dst = saveFileDialog.OpenFile();
+                dst.Write(data, 0, data.Length);
+                dst.Dispose();
+            }
         }
     }
 }

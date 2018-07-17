@@ -8,10 +8,31 @@ using System.Threading.Tasks;
 namespace PEHandler
 {
     /// <summary>
+    /// Trace logging delegate.
+    /// </summary>
+    /// <param name="msg">message to log</param>
+    public delegate void LogTrace(string msg);
+
+    /// <summary>
     /// A generic PE EXE handling class.
     /// </summary>
     public class PEFile
     {
+        /// <summary>
+        /// Default no-operation trace logging delegate.
+        /// </summary>
+        public static LogTrace NullTrace { get; private set; } = (string msg) => { };
+
+        /// <summary>
+        /// Trace logging delegate.
+        /// </summary>
+        internal static LogTrace trace = NullTrace;
+
+        /// <summary>
+        /// Trace logging delegate.
+        /// </summary>
+        public static LogTrace Trace { get => trace; set => trace = value ?? NullTrace; }
+
         /// <summary>
         /// The PE header.
         /// </summary>
@@ -81,6 +102,7 @@ namespace PEHandler
                 Sections.Add(s);
             }
             Test();
+            Trace($"File size is 0x{FileSize:X}");
             // Finally, initialize the .rsrc handler
             if (ResourcesIndex > 0)
                 RsrcHandler = new RsrcHandler(this);
@@ -212,7 +234,8 @@ namespace PEHandler
         {
             // rewrite .rsrc
             RsrcHandler?.Write();
-            byte[] data = new byte[Test(false)];
+            byte[] data = new byte[Test()];
+            Trace($"Data size is 0x{data.Length:X}");
             MemoryStream d = new MemoryStream(data);
             d.Write(earlyHeader, 0, earlyHeader.Length);
             foreach (Section s in Sections)
