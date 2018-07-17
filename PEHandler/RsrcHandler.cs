@@ -498,7 +498,7 @@ namespace PEHandler
                     sizes.dataSize += (uint)entry.Data.Length;
                 }
                 else if (entry.IsDirectory)
-                    sizes += CalculateSectionSizes(root, allocStr);
+                    sizes += CalculateSectionSizes(entry, allocStr);
                 else
                     throw new Exception("Entry has no data nor any subentries: " + entry.ToPath());
             }

@@ -34,6 +34,11 @@ namespace PEHandler
         public RsrcHandler RsrcHandler { get; private set; }
 
         /// <summary>
+        /// The total file size of the EXE.
+        /// </summary>
+        public long FileSize { get; private set; }
+
+        /// <summary>
         /// Creates a new <see cref="PEFile"/>, with data from the supplied <see cref="Stream"/>.
         /// </summary>
         /// <param name="src">stream to read EXE information from</param>
@@ -149,7 +154,7 @@ namespace PEHandler
                 if (v > fileSize)
                     fileSize = v;
             }
-            return (int)AlignForward(fileSize, fileAlignment);
+            return (int)(FileSize = AlignForward(fileSize, fileAlignment));
         }
 
         /// <summary>
