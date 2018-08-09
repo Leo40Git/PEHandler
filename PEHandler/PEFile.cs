@@ -44,6 +44,16 @@ namespace PEHandler
         public readonly MemoryStream earlyHeaderMS;
 
         /// <summary>
+        /// Reader for the PE header.
+        /// </summary>
+        public readonly BinaryReader earlyHeaderReader;
+
+        /// <summary>
+        /// Writer for the PE heaader.
+        /// </summary>
+        public readonly BinaryWriter earlyHeaderWriter;
+
+        /// <summary>
         /// The list of sections.
         /// </summary>
         public List<Section> Sections { get; private set; }
@@ -68,33 +78,35 @@ namespace PEHandler
         public PEFile(Stream src, uint expectedTex = 0x1000)
         {
             Sections = new List<Section>();
-            src.Position = 0;
+            src.Seek(0, SeekOrigin.Begin);
             earlyHeader = new byte[expectedTex];
             src.Read(earlyHeader, 0, (int)expectedTex);
             earlyHeaderMS = new MemoryStream(earlyHeader);
-            earlyHeaderMS.Position = NtHeaders;
-            if (earlyHeaderMS.ReadInt() != 0x00004550)
+            earlyHeaderReader = new BinaryReader(earlyHeaderMS, Encoding.UTF8, true);
+            earlyHeaderWriter = new BinaryWriter(earlyHeaderMS, Encoding.UTF8, true);
+            earlyHeaderMS.Seek(NtHeaders, SeekOrigin.Begin);
+            if (earlyHeaderReader.ReadUInt32() != 0x00004550)
                 throw new IOException("Not a valid PE file.");
-            earlyHeaderMS.Position += 2; // short: machine
-            uint sectionCount = (uint)(earlyHeaderMS.ReadShort() & 0xFFFF);
-            earlyHeaderMS.Position += 8; // int 1: unknown, int 2: symtab address
-            if (earlyHeaderMS.ReadInt() != 0)
+            earlyHeaderMS.Seek(2, SeekOrigin.Current); // short: machine
+            uint sectionCount = (uint)(earlyHeaderReader.ReadUInt16() & 0xFFFF);
+            earlyHeaderMS.Seek(8, SeekOrigin.Current); // int 1: unknown, int 2: symtab address
+            if (earlyHeaderReader.ReadUInt32() != 0)
                 throw new IOException(
                     "This file was linked with a symbol table. Since we don't want to accidentally destroy it, you get this error instead.");
-            uint optHeadSize = (uint)(earlyHeaderMS.ReadShort() & 0xFFFF);
-            earlyHeaderMS.Position += 2; // short: characteristics
+            uint optHeadSize = (uint)(earlyHeaderReader.ReadUInt16() & 0xFFFF);
+            earlyHeaderMS.Seek(2, SeekOrigin.Current); // short: characteristics
             // -- optional header --
             uint optHeadPoint = (uint)earlyHeaderMS.Position;
             if (optHeadSize < 0x78)
                 throw new IOException("Optional header size is under 0x78 (RESOURCE table info)");
-            ushort optHeadType = earlyHeaderMS.ReadShort();
+            ushort optHeadType = earlyHeaderReader.ReadUInt16();
             if (optHeadType != 0x010B)
                 throw new IOException("Unknown optional header type: " + optHeadType.ToString("X"));
             // Check that size of headers is what we thought
             if (GetOptionalHeaderInt(0x3C) != expectedTex)
                 throw new IOException("Size of headers must be as expected due to linearization fun");
             // Everything verified - load up the image sections
-            src.Position = optHeadPoint + optHeadSize;
+            src.Seek(optHeadPoint + optHeadSize, SeekOrigin.Begin);
             for (uint i = 0; i < sectionCount; i++)
             {
                 Section s = new Section();
@@ -133,9 +145,11 @@ namespace PEHandler
             // -- Allocate file addresses
             uint sectionAlignment = GetOptionalHeaderInt(0x20);
             uint fileAlignment = GetOptionalHeaderInt(0x24);
-            List<AllocationSpan> map = new List<AllocationSpan>();
-            // Disallow collision with the primary header
-            map.Add(new AllocationSpan(0, (uint)earlyHeader.Length));
+            List<AllocationSpan> map = new List<AllocationSpan>
+            {
+                // Disallow collision with the primary header
+                new AllocationSpan(0, (uint)earlyHeader.Length)
+            };
             for (int i = 0; i < 2; i++)
             {
                 foreach (Section s in Sections)
@@ -160,9 +174,9 @@ namespace PEHandler
             // -- Set Section Count / Rewrite section headers
             // 4: signature
             // 2: field: number of sections
-            earlyHeaderMS.Position = NtHeaders + 4 + 2;
-            earlyHeaderMS.WriteShort((ushort)Sections.Count);
-            earlyHeaderMS.Position = SectionHeaders;
+            earlyHeaderMS.Seek(NtHeaders + 4 + 2, SeekOrigin.Begin);
+            earlyHeaderWriter.Write((ushort)Sections.Count);
+            earlyHeaderMS.Seek(SectionHeaders, SeekOrigin.Begin);
             foreach (Section s in Sections)
                 s.WriteHead(earlyHeaderMS);
             // -- Image size is based on virtual size, not phys.
@@ -240,7 +254,7 @@ namespace PEHandler
             d.Write(earlyHeader, 0, earlyHeader.Length);
             foreach (Section s in Sections)
             {
-                d.Position = s.FileAddress;
+                d.Seek(s.FileAddress, SeekOrigin.Begin);
                 d.Write(s.RawData, 0, s.RawData.Length);
             }
             d.Dispose();
@@ -254,8 +268,8 @@ namespace PEHandler
         {
             get
             {
-                earlyHeaderMS.Position = 0x3C;
-                return earlyHeaderMS.ReadInt();
+                earlyHeaderMS.Seek(0x3C, SeekOrigin.Begin);
+                return earlyHeaderReader.ReadUInt32();
             }
         }
 
@@ -269,8 +283,8 @@ namespace PEHandler
                 uint nt = NtHeaders;
                 // 4: Signature
                 // 0x10: Field : Size of Optional Header
-                earlyHeaderMS.Position = nt + 4 + 0x10;
-                return (uint)(nt + 4 + 0x14 + (earlyHeaderMS.ReadShort() & 0xFFFF));
+                earlyHeaderMS.Seek(nt + 4 + 0x10, SeekOrigin.Begin);
+                return (uint)(nt + 4 + 0x14 + (earlyHeaderReader.ReadUInt16() & 0xFFFF));
             }
         }
 
@@ -281,7 +295,7 @@ namespace PEHandler
         private void SetOptHeaderIntPos(uint ofs)
         {
             // 0x18: Signature + IMAGE_FILE_HEADER
-            earlyHeaderMS.Position = NtHeaders + 0x18 + ofs;
+            earlyHeaderMS.Seek(NtHeaders + 0x18 + ofs, SeekOrigin.Begin);
         }
 
         /// <summary>
@@ -292,7 +306,7 @@ namespace PEHandler
         public uint GetOptionalHeaderInt(uint ofs)
         {
             SetOptHeaderIntPos(ofs);
-            return earlyHeaderMS.ReadInt();
+            return earlyHeaderReader.ReadUInt32();
         }
 
         /// <summary>
@@ -324,7 +338,7 @@ namespace PEHandler
                     if (rel < Math.Max((uint)s.RawData.Length, s.VirtualSize))
                     {
                         MemoryStream ms = new MemoryStream(s.RawData);
-                        ms.Position = rel;
+                        ms.Seek(rel, SeekOrigin.Begin);
                         return ms;
                     }
                 }
@@ -442,11 +456,13 @@ namespace PEHandler
         /// <returns></returns>
         public static Section CreateFillerSection(uint num, uint addr, uint size)
         {
-            Section filler = new Section();
-            filler.Tag = ".flr" + num.ToString("X4");
-            filler.VirtualAddress = addr;
-            filler.VirtualSize = size;
-            filler.Characteristics = SectionCharacteristics.CNT_UNINITIALIZED_DATA | SectionCharacteristics.MEM_READ | SectionCharacteristics.MEM_WRITE;
+            Section filler = new Section
+            {
+                Tag = ".flr" + num.ToString("X4"),
+                VirtualAddress = addr,
+                VirtualSize = size,
+                Characteristics = SectionCharacteristics.CNT_UNINITIALIZED_DATA | SectionCharacteristics.MEM_READ | SectionCharacteristics.MEM_WRITE
+            };
             return filler;
         }
 
@@ -746,19 +762,19 @@ namespace PEHandler
             /// <summary>
             /// The section tag, serialized for writing the section head (<see cref="WriteHead(Stream)"/>).
             /// </summary>
-            private byte[] tagData = new byte[8];
+            private readonly byte[] tagData = new byte[8];
 
             /// <summary>
             /// Gets and sets the section's tag.
             /// </summary>
             public string Tag
             {
-                get => Encoding.GetEncoding("Windows-1252").GetString(tagData);
+                get => Encoding.Default.GetString(tagData);
                 set
                 {
                     if (value == null)
                         throw new ArgumentNullException("s");
-                    byte[] data = Encoding.GetEncoding("Windows-1252").GetBytes(value);
+                    byte[] data = Encoding.Default.GetBytes(value);
                     Array.Copy(data, tagData, 8);
                 }
             }
@@ -808,22 +824,25 @@ namespace PEHandler
             /// <param name="src">stream to read from</param>
             public void Read(Stream src)
             {
-                src.Read(tagData, 0, 8);
-                VirtualSize = src.ReadInt();
-                VirtualAddress = src.ReadInt();
-                RawData = new byte[src.ReadInt()];
-                FileAddress = src.ReadInt();
-                MetaLinearize = FileAddress == VirtualAddress;
-                long saved = src.Position;
-                src.Position = FileAddress;
-                src.Read(RawData, 0, RawData.Length);
-                src.Position = saved;
-                src.Position += 8; // int 1: unknown, int 2: unknown
-                if (src.ReadShort() != 0)
-                    throw new IOException("Relocations not allowed");
-                if (src.ReadShort() != 0)
-                    throw new IOException("Line numbers not allowed");
-                Characteristics = (SectionCharacteristics)src.ReadInt();
+                using (BinaryReader r = new BinaryReader(src, Encoding.UTF8, true))
+                {
+                    r.Read(tagData, 0, 8);
+                    VirtualSize = r.ReadUInt32();
+                    VirtualAddress = r.ReadUInt32();
+                    RawData = new byte[r.ReadUInt32()];
+                    FileAddress = r.ReadUInt32();
+                    MetaLinearize = FileAddress == VirtualAddress;
+                    long saved = src.Position;
+                    src.Seek(FileAddress, SeekOrigin.Begin);
+                    src.Read(RawData, 0, RawData.Length);
+                    src.Seek(saved, SeekOrigin.Begin);
+                    src.Seek(8, SeekOrigin.Current); // int 1: unknown, int 2: unknown
+                    if (r.ReadUInt16() != 0)
+                        throw new IOException("Relocations not allowed");
+                    if (r.ReadUInt16() != 0)
+                        throw new IOException("Line numbers not allowed");
+                    Characteristics = (SectionCharacteristics)r.ReadUInt32();
+                }
             }
 
             /// <summary>
@@ -832,16 +851,19 @@ namespace PEHandler
             /// <param name="dst">stream to write to</param>
             public void WriteHead(Stream dst)
             {
-                dst.Write(tagData, 0, tagData.Length);
-                dst.WriteInt(VirtualSize);
-                dst.WriteInt(VirtualAddress);
-                dst.WriteInt((uint)RawData.Length);
-                dst.WriteInt(FileAddress);
-                dst.WriteInt(0);
-                dst.WriteInt(0);
-                dst.WriteShort(0);
-                dst.WriteShort(0);
-                dst.WriteInt((uint)Characteristics);
+                using (BinaryWriter w = new BinaryWriter(dst, Encoding.UTF8, true))
+                {
+                    w.Write(tagData);
+                    w.Write(VirtualSize);
+                    w.Write(VirtualAddress);
+                    w.Write((uint)RawData.Length);
+                    w.Write(FileAddress);
+                    w.Write((uint)0);
+                    w.Write((uint)0);
+                    w.Write((ushort)0);
+                    w.Write((ushort)0);
+                    w.Write((uint)Characteristics);
+                }
             }
 
             /// <summary>
@@ -890,15 +912,18 @@ namespace PEHandler
             /// <param name="pointer">pointer to resource directory table</param>
             private void ShiftDirTable(MemoryStream ms, int amt, uint pointer)
             {
-                ms.Position = pointer + 12;
-                // get the # of rsrc subdirs indexed by name
-                uint nEntry = ms.ReadShort();
-                // get the # of rsrc subdirs indexed by id
-                nEntry += ms.ReadShort();
-                // read and shift entries
-                uint pos = pointer + 16;
-                for (uint i = 0; i < nEntry; i++)
-                    RsrcShift(ms, amt, pos + i * 8);
+                using (BinaryReader r = new BinaryReader(ms, Encoding.UTF8, true))
+                {
+                    ms.Seek(pointer + 12, SeekOrigin.Begin);
+                    // get the # of rsrc subdirs indexed by name
+                    uint nEntry = r.ReadUInt16();
+                    // get the # of rsrc subdirs indexed by id
+                    nEntry += r.ReadUInt16();
+                    // read and shift entries
+                    uint pos = pointer + 16;
+                    for (uint i = 0; i < nEntry; i++)
+                        RsrcShift(ms, amt, pos + i * 8);
+                }
             }
 
             /// <summary>
@@ -909,17 +934,21 @@ namespace PEHandler
             /// <param name="pointer">pointer to resource entry</param>
             private void RsrcShift(MemoryStream ms, int amt, uint pointer)
             {
-                ms.Position = pointer + 4;
-                uint rva = ms.ReadInt();
+                BinaryReader r = new BinaryReader(ms, Encoding.UTF8, true);
+                BinaryWriter w = new BinaryWriter(ms, Encoding.UTF8, true);
+                ms.Seek(pointer + 4, SeekOrigin.Begin);
+                uint rva = r.ReadUInt32();
                 if ((rva & 0x80000000) != 0) // if hi bit 1 points to another directory table
                     ShiftDirTable(ms, amt, rva & 0x7FFFFFFF);
                 else
                 {
-                    ms.Position = rva;
-                    uint oldVal = ms.ReadInt();
-                    ms.Position = rva;
-                    ms.WriteInt((uint)(oldVal + amt));
+                    ms.Seek(rva, SeekOrigin.Begin);
+                    uint oldVal = r.ReadUInt32(); ;
+                    ms.Seek(rva, SeekOrigin.Begin);
+                    w.Write((uint)(oldVal + amt));
                 }
+                r.Dispose();
+                w.Dispose();
             }
 
             /// <summary>

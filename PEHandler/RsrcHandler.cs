@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using static PEHandler.PEFile;
 
 namespace PEHandler
@@ -11,6 +12,11 @@ namespace PEHandler
     /// </summary>
     public class RsrcEntry
     {
+        /// <summary>
+        /// Gets the root entry of the ".rsrc" section this entry is contained in. If this is null, this entry is the root entry.
+        /// </summary>
+        public RsrcEntry Root { get; internal set; }
+
         /// <summary>
         /// Gets the parent of this entry.
         /// </summary>
@@ -73,7 +79,7 @@ namespace PEHandler
         /// <summary>
         /// The entry's subentry list. If this is null, this entry is a data entry (see <see cref="Data"/>.
         /// </summary>
-        public List<RsrcEntry> Entries { get; set; }
+        public LinkedList<RsrcEntry> Entries { get; set; }
 
         /// <summary>
         /// The entry's codepage. Specific to data entries.
@@ -111,6 +117,7 @@ namespace PEHandler
         /// <param name="parent">parent entry</param>
         internal RsrcEntry(RsrcEntry parent)
         {
+            Root = parent?.Root;
             Parent = parent;
         }
 
@@ -151,8 +158,9 @@ namespace PEHandler
         public void AddSubEntry(RsrcEntry e)
         {
             AssertIsDirectory();
+            e.Root = Root;
             e.Parent = this;
-            Entries.Add(e);
+            Entries.AddLast(e);
         }
 
         /// <summary>
@@ -163,7 +171,7 @@ namespace PEHandler
         {
             AssertIsDirectory();
             RsrcEntry e = new RsrcEntry(this);
-            Entries.Add(e);
+            Entries.AddLast(e);
             return e;
         }
 
@@ -277,8 +285,7 @@ namespace PEHandler
                     entry = entry.GetSubEntry(pathPart);
                 else
                 {
-                    uint id = 0;
-                    bool ok = uint.TryParse(pathPart, out id);
+                    bool ok = uint.TryParse(pathPart, out uint id);
                     if (ok)
                         entry = entry.GetSubEntry(id);
                     else
@@ -315,7 +322,8 @@ namespace PEHandler
             rsrcSec.ShiftResourceContents((int)-rsrcSec.VirtualAddress);
             Root = new RsrcEntry(null)
             {
-                Entries = new List<RsrcEntry>()
+                Root = null,
+                Entries = new LinkedList<RsrcEntry>()
             };
             MemoryStream src = new MemoryStream(rsrcSec.RawData);
             ReadDirectory(src, Root);
@@ -399,7 +407,7 @@ namespace PEHandler
             Trace($"Resource data: 0x{sectionSizes.dataSize:X}");
             Trace($"TOTAL: 0x{sectionSizes.totalSize:X}");
             Trace("-- END --");
-            byte[] dstBuf = new byte[sectionSizes.totalSize];
+            byte[] dstBuf = new byte[sectionSizes.totalSize + 0xDC6];
             MemoryStream dst = new MemoryStream(dstBuf);
             ReferenceMemory refMem = new ReferenceMemory();
             // write directories, leave references blank
@@ -407,6 +415,7 @@ namespace PEHandler
             // write references
             WriteReferences(dst, sectionSizes, refMem);
             rsrcSec.RawData = dstBuf;
+            rsrcSec.VirtualSize = (uint)dstBuf.Length;
             srcFile.Malloc(rsrcSec);
             // update offsets
             uint rsrcSecRVA = rsrcSec.VirtualAddress;
@@ -421,70 +430,76 @@ namespace PEHandler
         /// <param name="root">root entry</param>
         private void ReadDirectory(MemoryStream src, RsrcEntry root)
         {
-            long posStorage = 0;
-            root.DirCharacteristics = src.ReadInt();
-            root.DirTimestamp = src.ReadInt();
-            root.DirVersionMajor = src.ReadShort();
-            root.DirVersionMinor = src.ReadShort();
-            uint entries = src.ReadShort();
-            entries += src.ReadShort();
-            for (uint i = 0; i < entries; i++)
+            using (BinaryReader r = new BinaryReader(src, Encoding.UTF8, true))
             {
-                RsrcEntry entry = new RsrcEntry(root);
-                uint nameOffset = src.ReadInt();
-                if ((nameOffset & 0x80000000) == 0)
-                    // id
-                    entry.ID = nameOffset;
-                else
+                long posStorage = 0;
+                root.DirCharacteristics = r.ReadUInt32();
+                root.DirTimestamp = r.ReadUInt32();
+                root.DirVersionMajor = r.ReadUInt16();
+                root.DirVersionMinor = r.ReadUInt16();
+                uint entries = r.ReadUInt16();
+                entries += r.ReadUInt16();
+                for (uint i = 0; i < entries; i++)
                 {
-                    // name
-                    posStorage = src.Position;
-                    nameOffset &= 0x7FFFFFFF;
-                    src.Position = nameOffset;
-                    ushort nameLen = src.ReadShort();
-                    char[] nameBuf = new char[nameLen];
-                    for (int j = 0; j < nameLen; j++)
-                        nameBuf[j] = (char)src.ReadShort();
-                    entry.Name = new string(nameBuf);
-                    src.Position = posStorage;
+                    RsrcEntry entry = new RsrcEntry(root);
+                    uint nameOffset = r.ReadUInt32();
+                    if ((nameOffset & 0x80000000) == 0)
+                        // id
+                        entry.ID = nameOffset;
+                    else
+                    {
+                        // name
+                        posStorage = src.Position;
+                        nameOffset &= 0x7FFFFFFF;
+                        src.Seek(nameOffset, SeekOrigin.Begin);
+                        ushort nameLen = r.ReadUInt16();
+                        char[] nameBuf = new char[nameLen];
+                        for (int j = 0; j < nameLen; j++)
+                            nameBuf[j] = (char)r.ReadUInt16();
+                        entry.Name = new string(nameBuf);
+                        src.Seek(posStorage, SeekOrigin.Begin);
+                    }
+                    ReadEntryData(src, entry);
+                    root.Entries.AddLast(entry);
                 }
-                ReadEntryData(src, entry);
-                root.Entries.Add(entry);
             }
         }
 
         /// <summary>
-        /// Reads an entry's data
+        /// Reads an entry's data.
         /// </summary>
         /// <param name="src">stream to read from</param>
         /// <param name="entry">entry to apply data to</param>
         private void ReadEntryData(MemoryStream src, RsrcEntry entry)
         {
-            uint dataOffset = src.ReadInt();
-            long posStorage = src.Position;
-            if ((dataOffset & 0x80000000) == 0)
+            using (BinaryReader r = new BinaryReader(src, Encoding.UTF8, true))
             {
-                // data
-                src.Position = dataOffset;
-                uint dataPos = src.ReadInt();
-                uint dataSize = src.ReadInt();
-                entry.DataCodepage = src.ReadInt();
-                entry.DataReserved = src.ReadInt();
-                // read the data
-                src.Position = dataPos;
-                byte[] entryData = new byte[dataSize];
-                src.Read(entryData, 0, (int)dataSize);
-                entry.Data = entryData;
+                uint dataOffset = r.ReadUInt32();
+                long posStorage = src.Position;
+                if ((dataOffset & 0x80000000) == 0)
+                {
+                    // data
+                    src.Seek(dataOffset, SeekOrigin.Begin);
+                    uint dataPos = r.ReadUInt32();
+                    uint dataSize = r.ReadUInt32();
+                    entry.DataCodepage = r.ReadUInt32();
+                    entry.DataReserved = r.ReadUInt32();
+                    // read the data
+                    src.Seek(dataPos, SeekOrigin.Begin);
+                    byte[] entryData = new byte[dataSize];
+                    src.Read(entryData, 0, (int)dataSize);
+                    entry.Data = entryData;
+                }
+                else
+                {
+                    // subdirectory
+                    dataOffset &= 0x7FFFFFFF;
+                    entry.Entries = new LinkedList<RsrcEntry>();
+                    src.Seek(dataOffset, SeekOrigin.Begin);
+                    ReadDirectory(src, entry);
+                }
+                src.Seek(posStorage, SeekOrigin.Begin);
             }
-            else
-            {
-                // subdirectory
-                dataOffset &= 0x7FFFFFFF;
-                entry.Entries = new List<RsrcEntry>();
-                src.Position = dataOffset;
-                ReadDirectory(src, entry);
-            }
-            src.Position = posStorage;
         }
 
         /// <summary>
@@ -628,8 +643,7 @@ namespace PEHandler
             /// <param name="refPos">reference position</param>
             private void AddReference<TKey>(Dictionary<TKey, List<uint>> refMap, TKey key, uint refPos)
             {
-                List<uint> refList = null;
-                bool succ = refMap.TryGetValue(key, out refList);
+                bool succ = refMap.TryGetValue(key, out List<uint> refList);
                 if (!succ)
                 {
                     refList = new List<uint>();
@@ -649,7 +663,7 @@ namespace PEHandler
             }
 
             /// <summary>
-            /// Adds a directory reference.
+            /// Adds a data entry reference.
             /// </summary>
             /// <param name="entry">data entry</param>
             /// <param name="refPos">reference position</param>
@@ -677,62 +691,76 @@ namespace PEHandler
         /// <param name="refMem">offset and reference storage</param>
         private void WriteDirectory(MemoryStream dst, RsrcEntry root, ReferenceMemory refMem)
         {
-            refMem.AddDirectoryOffset(root, (uint)dst.Position);
-            // write unimportant fields
-            dst.WriteInt(root.DirCharacteristics);
-            dst.WriteInt(root.DirTimestamp);
-            dst.WriteShort(root.DirVersionMajor);
-            dst.WriteShort(root.DirVersionMinor);
-            // first romp to count name/ID entries
-            List<RsrcEntry> nameEntries = new List<RsrcEntry>(), idEntries = new List<RsrcEntry>();
-            ushort nameEntryCount = 0, idEntryCount = 0;
-            foreach (RsrcEntry entry in root.Entries)
+            using (BinaryWriter w = new BinaryWriter(dst, Encoding.UTF8, true))
             {
-                if (entry.Name == null)
+                refMem.AddDirectoryOffset(root, (uint)dst.Position);
+                // write unimportant fields
+                w.Write(root.DirCharacteristics);
+                w.Write(root.DirTimestamp);
+                w.Write(root.DirVersionMajor);
+                w.Write(root.DirVersionMinor);
+                // first romp to count name/ID entries
+                LinkedList<RsrcEntry> nameEntries = new LinkedList<RsrcEntry>(), idEntries = new LinkedList<RsrcEntry>();
+                ushort nameEntryCount = 0, idEntryCount = 0;
+                foreach (RsrcEntry entry in root.Entries)
                 {
-                    nameEntryCount++;
-                    idEntries.Add(entry);
+                    if (entry.Name == null)
+                    {
+                        idEntryCount++;
+                        idEntries.AddLast(entry);
+                    }
+                    else
+                    {
+                        nameEntryCount++;
+                        nameEntries.AddLast(entry);
+                    }
                 }
-                else
-                {
-                    idEntryCount++;
-                    nameEntries.Add(entry);
-                }
+                // write em out
+                w.Write(nameEntryCount);
+                w.Write(idEntryCount);
+                // second romp to actually write it
+                // make a subdir list to write *after* writing the entire directory
+                LinkedList<RsrcEntry> subdirs = new LinkedList<RsrcEntry>();
+                WriteDirectoryEntries(w, nameEntries, subdirs, refMem);
+                WriteDirectoryEntries(w, idEntries, subdirs, refMem);
+                // now write the subdirectories
+                foreach (RsrcEntry entry in subdirs)
+                    WriteDirectory(dst, entry, refMem);
             }
-            List<RsrcEntry> entries = new List<RsrcEntry>(nameEntries);
-            entries.AddRange(idEntries);
-            // write em out
-            dst.WriteShort(nameEntryCount);
-            dst.WriteShort(idEntryCount);
-            // second romp to actually write it
-            // make a subdir list to write *after* writing the entire directory
-            List<RsrcEntry> subdirs = new List<RsrcEntry>();
+        }
+
+        /// <summary>
+        /// Writes a directory's entries.
+        /// </summary>
+        /// <param name="w">stream writer</param>
+        /// <param name="entries">entry list</param>
+        /// <param name="subdirs">subdirectory list</param>
+        /// <param name="refMem">offset and reference storage</param>
+        private void WriteDirectoryEntries(BinaryWriter w, LinkedList<RsrcEntry> entries, LinkedList<RsrcEntry> subdirs, ReferenceMemory refMem)
+        {
             foreach (RsrcEntry entry in entries)
             {
                 if (entry.Name == null)
-                    dst.WriteInt(entry.ID);
+                    w.Write(entry.ID);
                 else
                 {
-                    refMem.AddStringReference(entry.Name, (uint)dst.Position);
-                    dst.WriteInt(0x80000000);
+                    refMem.AddStringReference(entry.Name, (uint)w.BaseStream.Position);
+                    w.Write(0x80000000);
                 }
                 if (entry.IsDirectory)
                 {
-                    refMem.AddDirectoryReference(entry, (uint)dst.Position);
-                    dst.WriteInt(0x80000000);
-                    subdirs.Add(entry);
+                    refMem.AddDirectoryReference(entry, (uint)w.BaseStream.Position);
+                    w.Write(0x80000000);
+                    subdirs.AddLast(entry);
                 }
                 else if (entry.Data != null)
                 {
-                    refMem.AddDataEntryReference(entry, (uint)dst.Position);
-                    dst.WriteInt(0);
+                    refMem.AddDataEntryReference(entry, (uint)w.BaseStream.Position);
+                    w.Write((uint)0);
                 }
                 else
                     throw new Exception("Entry has no data nor any subentries: " + entry.ToPath());
             }
-            // now write the subdirectories
-            foreach (RsrcEntry entry in subdirs)
-                WriteDirectory(dst, entry, refMem);
         }
 
         /// <summary>
@@ -743,68 +771,71 @@ namespace PEHandler
         /// <param name="refMem">offset and reference storage</param>
         private void WriteReferences(MemoryStream dst, SectionSizes sectionSizes, ReferenceMemory refMem)
         {
-            // write subdirectory references
-            foreach (KeyValuePair<RsrcEntry, List<uint>> entry in refMem.directoryReferences)
+            using (BinaryWriter w = new BinaryWriter(dst, Encoding.UTF8, true))
             {
-                bool ok = refMem.directoryOffsets.TryGetValue(entry.Key, out uint off);
-                if (!ok)
-                    throw new Exception("Directory is missing offset: " + entry.Key.ToPath());
-                off |= 0x80000000;
-                foreach (uint refLoc in entry.Value)
+                // write subdirectory references
+                foreach (KeyValuePair<RsrcEntry, List<uint>> entry in refMem.directoryReferences)
                 {
-                    dst.Position = refLoc;
-                    dst.WriteInt(off);
+                    bool ok = refMem.directoryOffsets.TryGetValue(entry.Key, out uint off);
+                    if (!ok)
+                        throw new Exception("Directory is missing offset: " + entry.Key.ToPath());
+                    off |= 0x80000000;
+                    foreach (uint refLoc in entry.Value)
+                    {
+                        dst.Seek(refLoc, SeekOrigin.Begin);
+                        w.Write(off);
+                    }
                 }
-            }
-            // write actual data, remember offsets
-            Dictionary<RsrcEntry, uint> dataOffsets = new Dictionary<RsrcEntry, uint>();
-            dst.Position = sectionSizes.directorySize + sectionSizes.dataEntrySize + sectionSizes.stringSize;
-            Trace($"dst.Length = 0x{dst.Length:X}");
-            foreach (KeyValuePair<RsrcEntry, List<uint>> entry in refMem.dataEntryReferences)
-            {
-                Trace($"Writing data for entry {entry.Key.ToPath()} at 0x{dst.Position:X} with size 0x{entry.Key.Data.Length:X}, ends at 0x{(dst.Position + entry.Key.Data.Length):X}");
-                dataOffsets.Add(entry.Key, (uint)dst.Position);
-                byte[] data = entry.Key.Data;
-                dst.Write(data, 0, data.Length);
-            }
-            // write data entries and their references
-            dst.Position = sectionSizes.directorySize;
-            foreach (KeyValuePair<RsrcEntry, List<uint>> entry in refMem.dataEntryReferences)
-            {
-                uint off = (uint)dst.Position;
-                foreach (uint refLoc in entry.Value)
+                // write actual data, remember offsets
+                Dictionary<RsrcEntry, uint> dataOffsets = new Dictionary<RsrcEntry, uint>();
+                dst.Seek(sectionSizes.directorySize + sectionSizes.dataEntrySize + sectionSizes.stringSize, SeekOrigin.Begin);
+                Trace($"dst.Length = 0x{dst.Length:X}");
+                foreach (KeyValuePair<RsrcEntry, List<uint>> entry in refMem.dataEntryReferences)
                 {
-                    dst.Position = refLoc;
-                    dst.WriteInt(off);
+                    Trace($"Writing data for entry {entry.Key.ToPath()} at 0x{dst.Position:X} with size 0x{entry.Key.Data.Length:X}, ends at 0x{(dst.Position + entry.Key.Data.Length):X}");
+                    dataOffsets.Add(entry.Key, (uint)dst.Position);
+                    byte[] data = entry.Key.Data;
+                    w.Write(data);
                 }
-                dst.Position = off;
-                RsrcEntry rsrc = entry.Key;
-                bool ok = dataOffsets.TryGetValue(rsrc, out uint dataPos);
-                if (!ok)
-                    throw new Exception("Data is missing offset: " + rsrc.ToPath());
-                Trace($"Writing data entry for entry {entry.Key.ToPath()} at 0x{dst.Position:X}; position is 0x{dataPos:X}, size is 0x{rsrc.Data.Length:X}");
-                dst.WriteInt(dataPos);
-                dst.WriteInt((uint)rsrc.Data.Length);
-                dst.WriteInt(rsrc.DataCodepage);
-                dst.WriteInt(rsrc.DataReserved);
-            }
-            // write strings (directory names) and their references
-            dst.Position = sectionSizes.directorySize + sectionSizes.dataEntrySize;
-            foreach (KeyValuePair<string, List<uint>> entry in refMem.stringReferences)
-            {
-                uint pos = (uint)dst.Position;
-                uint off = pos | 0x80000000;
-                foreach (uint refLoc in entry.Value)
+                // write data entries and their references
+                dst.Seek(sectionSizes.directorySize, SeekOrigin.Begin);
+                foreach (KeyValuePair<RsrcEntry, List<uint>> entry in refMem.dataEntryReferences)
                 {
-                    dst.Position = refLoc;
-                    dst.WriteInt(off);
+                    uint off = (uint)dst.Position;
+                    foreach (uint refLoc in entry.Value)
+                    {
+                        dst.Seek(refLoc, SeekOrigin.Begin);
+                        w.Write(off);
+                    }
+                    dst.Seek(off, SeekOrigin.Begin);
+                    RsrcEntry rsrc = entry.Key;
+                    bool ok = dataOffsets.TryGetValue(rsrc, out uint dataPos);
+                    if (!ok)
+                        throw new Exception("Data is missing offset: " + rsrc.ToPath());
+                    Trace($"Writing data entry for entry {entry.Key.ToPath()} at 0x{dst.Position:X}; position is 0x{dataPos:X}, size is 0x{rsrc.Data.Length:X}");
+                    w.Write(dataPos);
+                    w.Write((uint)rsrc.Data.Length);
+                    w.Write(rsrc.DataCodepage);
+                    w.Write(rsrc.DataReserved);
                 }
-                dst.Position = pos;
-                string str = entry.Key;
-                ushort strLen = (ushort)str.Length;
-                dst.WriteShort(strLen);
-                for (int i = 0; i < strLen; i++)
-                    dst.WriteShort(str[i]);
+                // write strings (directory names) and their references
+                dst.Seek(sectionSizes.directorySize + sectionSizes.dataEntrySize, SeekOrigin.Begin);
+                foreach (KeyValuePair<string, List<uint>> entry in refMem.stringReferences)
+                {
+                    uint pos = (uint)dst.Position;
+                    uint off = pos | 0x80000000;
+                    foreach (uint refLoc in entry.Value)
+                    {
+                        dst.Seek(refLoc, SeekOrigin.Begin);
+                        w.Write(off);
+                    }
+                    dst.Seek(pos, SeekOrigin.Begin);
+                    string str = entry.Key;
+                    ushort strLen = (ushort)str.Length;
+                    w.Write(strLen);
+                    for (int i = 0; i < strLen; i++)
+                        w.Write((ushort)str[i]);
+                }
             }
         }
     }

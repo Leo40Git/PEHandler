@@ -30,7 +30,13 @@ namespace PEHandlerTest
         {
             if (openFileDialog.ShowDialog() == DialogResult.OK)
             {
+                Trace($"Opening file: {openFileDialog.FileName}");
                 Stream s = openFileDialog.OpenFile();
+                if (!s.CanRead)
+                {
+                    MessageBox.Show(this, "Stream is not readable (CanRead is false)", "what", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
                 peData = new PEFile(s, 0x1000);
                 s.Dispose();
                 rsrcHandler = peData.RsrcHandler;
@@ -51,32 +57,21 @@ namespace PEHandlerTest
             controls.Clear();
             Section selSec = sectionList.SelectedItem as Section;
             int selSecID = peData.Sections.IndexOf(selSec);
-            if (selSecID == peData.ResourcesIndex)
+            FlowLayoutPanel panel = new FlowLayoutPanel
             {
-                TreeView treeView = new TreeView
-                {
-                    Dock = DockStyle.Fill
-                };
-                TreeNodeCollection col = treeView.Nodes;
-                AddNodes(rsrcHandler.Root, col);
-                controls.Add(treeView);
-            }
-            else
-            {
-                FlowLayoutPanel panel = new FlowLayoutPanel();
-                panel.FlowDirection = FlowDirection.TopDown;
-                panel.Dock = DockStyle.Fill;
-                controls.Add(panel);
-                controls = panel.Controls;
-                panelWidth = panel.Size.Width;
-                AddLabel(controls, $"Tag: {selSec.Tag}");
-                AddLabel(controls, $"Linearized: {(selSec.MetaLinearize ? "Yes" : "No")}");
-                AddLabel(controls, $"Virtual Address: 0x{selSec.VirtualAddress.ToString("X8")}");
-                AddLabel(controls, $"Virtual Size: 0x{selSec.VirtualSize.ToString("X8")}");
-                AddLabel(controls, $"File Address: 0x{selSec.FileAddress.ToString("X8")}");
-                AddLabel(controls, $"File Size: 0x{selSec.RawData.Length.ToString("X8")}");
-                AddLabel(controls, $"Characteristics: {selSec.Characteristics}");
-            }
+                FlowDirection = FlowDirection.TopDown,
+                Dock = DockStyle.Fill
+            };
+            controls.Add(panel);
+            controls = panel.Controls;
+            panelWidth = panel.Size.Width;
+            AddLabel(controls, $"Tag: {selSec.Tag}");
+            AddLabel(controls, $"Linearized: {(selSec.MetaLinearize ? "Yes" : "No")}");
+            AddLabel(controls, $"Virtual Address: 0x{selSec.VirtualAddress.ToString("X8")}");
+            AddLabel(controls, $"Virtual Size: 0x{selSec.VirtualSize.ToString("X8")}");
+            AddLabel(controls, $"File Address: 0x{selSec.FileAddress.ToString("X8")}");
+            AddLabel(controls, $"File Size: 0x{selSec.RawData.Length.ToString("X8")}");
+            AddLabel(controls, $"Characteristics: {selSec.Characteristics}");
         }
 
         private void AddNodes(RsrcEntry rootEntry, TreeNodeCollection col, TreeNode rootNode = null)
@@ -95,7 +90,7 @@ namespace PEHandlerTest
                 if (entry.IsDirectory)
                     AddNodes(entry, col, entryNode);
                 else
-                    entryNode.Nodes.Add(entry.PathName);
+                    entryNode.Nodes.Add(entry.PathName + $" (0x{entry.Data.Length:X} bytes)");
             }
         }
 
