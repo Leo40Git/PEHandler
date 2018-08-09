@@ -329,67 +329,6 @@ namespace PEHandler
             ReadDirectory(src, Root);
             src.Dispose();
             rsrcSec.ShiftResourceContents((int)rsrcSec.VirtualAddress);
-            TraceRsrcResults res = TraceRsrc(Root);
-            Trace($"Size of .rsrc section is 0x{rsrcSec.RawData.Length:X} bytes");
-            Trace($"{res.dirCount} directories, {res.datCount} data entries");
-            Trace($"{res.strs.Count} unique strings, 0x{res.strSize:X} bytes in total");
-            Trace($"Total data size is 0x{res.datSize:X} bytes");
-        }
-
-        private struct TraceRsrcResults
-        {
-            public int dirCount;
-            public int datCount;
-            public int datSize;
-            public List<string> strs;
-            public int strSize;
-
-            public static TraceRsrcResults operator +(TraceRsrcResults s1, TraceRsrcResults s2)
-            {
-                TraceRsrcResults res;
-                res.dirCount = s1.dirCount + s2.dirCount;
-                res.datCount = s1.datCount + s2.datCount;
-                res.datSize = s1.datSize + s2.datSize;
-                res.strs = new List<string>(s1.strs);
-                res.strs.AddRange(s2.strs);
-                res.strSize = s1.strSize + s2.strSize;
-                return res;
-            }
-        }
-
-        private TraceRsrcResults TraceRsrc(RsrcEntry root, int indent = 0)
-        {
-            TraceRsrcResults res;
-            res.dirCount = 0;
-            res.datCount = 0;
-            res.datSize = 0;
-            res.strs = new List<string>();
-            res.strSize = 0;
-            string indentStr = new string(' ', indent);
-            foreach (RsrcEntry entry in root.Entries)
-            {
-                Trace($"{indentStr}{(entry.IsDirectory ? "DIR" : "DAT")} {entry.PathName}");
-                if (entry.Name != null)
-                {
-                    if (!res.strs.Contains(entry.Name))
-                    {
-                        res.strs.Add(entry.Name);
-                        res.strSize += 2 + entry.Name.Length * 2;
-                    }
-                }
-                if (entry.IsDirectory)
-                {
-                    res.dirCount++;
-                    res += TraceRsrc(entry, indent + 1);
-                }
-                else
-                {
-                    res.datCount++;
-                    res.datSize += entry.Data.Length;
-                    Trace($"{indentStr} Size is 0x{entry.Data.Length:X} bytes");
-                }
-            }
-            return res;
         }
 
         /// <summary>
@@ -407,7 +346,7 @@ namespace PEHandler
             Trace($"Resource data: 0x{sectionSizes.dataSize:X}");
             Trace($"TOTAL: 0x{sectionSizes.totalSize:X}");
             Trace("-- END --");
-            byte[] dstBuf = new byte[sectionSizes.totalSize + 0xDC6];
+            byte[] dstBuf = new byte[sectionSizes.totalSize];
             MemoryStream dst = new MemoryStream(dstBuf);
             ReferenceMemory refMem = new ReferenceMemory();
             // write directories, leave references blank
