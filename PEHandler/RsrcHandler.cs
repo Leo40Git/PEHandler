@@ -344,9 +344,9 @@ namespace PEHandler
             Trace($"Data entries: 0x{sectionSizes.dataEntrySize:X}");
             Trace($"String definitions: 0x{sectionSizes.stringSize:X}");
             Trace($"Resource data: 0x{sectionSizes.dataSize:X}");
-            Trace($"TOTAL: 0x{sectionSizes.totalSize:X}");
+            Trace($"TOTAL: 0x{sectionSizes.TotalSize:X}");
             Trace("-- END --");
-            byte[] dstBuf = new byte[sectionSizes.totalSize];
+            byte[] dstBuf = new byte[sectionSizes.TotalSize];
             MemoryStream dst = new MemoryStream(dstBuf);
             ReferenceMemory refMem = new ReferenceMemory();
             // write directories, leave references blank
@@ -359,7 +359,7 @@ namespace PEHandler
             // update offsets
             uint rsrcSecRVA = rsrcSec.VirtualAddress;
             rsrcSec.ShiftResourceContents((int)rsrcSecRVA);
-            srcFile.SetOptionalHeaderInt(0x70, rsrcSecRVA);
+            srcFile.OptionalHeaderInts[0x70] = rsrcSecRVA;
         }
 
         /// <summary>
@@ -447,11 +447,6 @@ namespace PEHandler
         private struct SectionSizes
         {
             /// <summary>
-            /// Total size of the ".rsrc" section.
-            /// </summary>
-            public uint totalSize;
-
-            /// <summary>
             /// Size of the directory tables.
             /// </summary>
             public uint directorySize;
@@ -472,6 +467,11 @@ namespace PEHandler
             public uint dataSize;
 
             /// <summary>
+            /// Total size of the ".rsrc" section.
+            /// </summary>
+            public uint TotalSize => directorySize + dataEntrySize + stringSize + dataSize;
+
+            /// <summary>
             /// Combines two <see cref="SectionSizes"/> instances together.
             /// </summary>
             /// <param name="s1">first instance</param>
@@ -484,7 +484,6 @@ namespace PEHandler
                 sizes.dataEntrySize = s1.dataEntrySize + s2.dataEntrySize;
                 sizes.stringSize = s1.stringSize + s2.stringSize;
                 sizes.dataSize = s1.dataSize + s2.dataSize;
-                sizes.totalSize = sizes.directorySize + sizes.dataEntrySize + sizes.stringSize + sizes.dataSize;
                 return sizes;
             }
         }
@@ -500,7 +499,6 @@ namespace PEHandler
             if (allocStr == null)
                 allocStr = new List<string>();
             SectionSizes sizes;
-            sizes.totalSize = 0;
             sizes.directorySize = 0x10;
             sizes.dataEntrySize = 0;
             sizes.stringSize = 0;
@@ -523,7 +521,6 @@ namespace PEHandler
                 else
                     throw new Exception("Entry has no data nor any subentries: " + entry.ToPath());
             }
-            sizes.totalSize = sizes.directorySize + sizes.dataEntrySize + sizes.stringSize + sizes.dataSize;
             return sizes;
         }
 

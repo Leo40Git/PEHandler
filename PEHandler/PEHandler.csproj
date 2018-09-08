@@ -7,14 +7,16 @@
     <Authors>Leo40Git, 20kdc</Authors>
     <Description>A .NET Core library that allows editing PE EXE sections, with special support for the .rsrc section.</Description>
     <Copyright>Copyright © Leo40Git 2018</Copyright>
-    <PackageReleaseNotes>Remove debug junk</PackageReleaseNotes>
+    <PackageReleaseNotes>Replace Get/SetOptionalHeaderInt with OptionalHeaderInts[]
+More BinaryReader/Writer work
+Add common optional header ints (image base, section alignment, file alignment, header size)</PackageReleaseNotes>
     <PackageProjectUrl>https://github.com/Leo40Git/PEHandler</PackageProjectUrl>
     <PackageLicenseUrl>https://raw.githubusercontent.com/Leo40Git/PEHandler/master/LICENSE</PackageLicenseUrl>
     <RepositoryUrl>https://github.com/Leo40Git/PEHandler</RepositoryUrl>
     <RepositoryType>GitHub</RepositoryType>
     <PackageTags>pe exe rsrc utility</PackageTags>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <Version>1.0.3.3</Version>
+    <Version>1.0.3.4</Version>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">

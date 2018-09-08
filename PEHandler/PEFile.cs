@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -102,8 +103,9 @@ namespace PEHandler
             ushort optHeadType = earlyHeaderReader.ReadUInt16();
             if (optHeadType != 0x010B)
                 throw new IOException("Unknown optional header type: " + optHeadType.ToString("X"));
+            OptionalHeaderInts = new PEOptionalHeaderInts(this);
             // Check that size of headers is what we thought
-            if (GetOptionalHeaderInt(0x3C) != expectedTex)
+            if (HeaderSize != expectedTex)
                 throw new IOException("Size of headers must be as expected due to linearization fun");
             // Everything verified - load up the image sections
             src.Seek(optHeadPoint + optHeadSize, SeekOrigin.Begin);
@@ -143,8 +145,6 @@ namespace PEHandler
             if (justOrderAndOverlap)
                 return -1;
             // -- Allocate file addresses
-            uint sectionAlignment = GetOptionalHeaderInt(0x20);
-            uint fileAlignment = GetOptionalHeaderInt(0x24);
             List<AllocationSpan> map = new List<AllocationSpan>
             {
                 // Disallow collision with the primary header
@@ -166,7 +166,7 @@ namespace PEHandler
                     {
                         uint position = 0;
                         while (!CheckAllocation(map, new AllocationSpan(position, (uint)s.RawData.Length)))
-                            position += fileAlignment;
+                            position += FileAlignment;
                         s.FileAddress = position;
                     }
                 }
@@ -181,7 +181,7 @@ namespace PEHandler
                 s.WriteHead(earlyHeaderMS);
             // -- Image size is based on virtual size, not phys.
             uint imageSize = ImageSize;
-            SetOptionalHeaderInt(0x38, AlignForward(imageSize, sectionAlignment));
+            OptionalHeaderInts[0x38] = AlignForward(imageSize, SectionAlignment);
             // -- File size based on the allocation map
             uint fileSize = 0;
             foreach (AllocationSpan allocSpan in map)
@@ -190,7 +190,7 @@ namespace PEHandler
                 if (v > fileSize)
                     fileSize = v;
             }
-            return (int)(FileSize = AlignForward(fileSize, fileAlignment));
+            return (int)(FileSize = AlignForward(fileSize, FileAlignment));
         }
 
         /// <summary>
@@ -289,37 +289,64 @@ namespace PEHandler
         }
 
         /// <summary>
-        /// Sets the <see cref="earlyHeaderMS"/>'s position to read from/write to an offset in the optional header.
+        /// Handles getting and setting integer fields in the optional header.
         /// </summary>
-        /// <param name="ofs">offset from optional header start</param>
-        private void SetOptHeaderIntPos(uint ofs)
+        public class PEOptionalHeaderInts
         {
-            // 0x18: Signature + IMAGE_FILE_HEADER
-            earlyHeaderMS.Seek(NtHeaders + 0x18 + ofs, SeekOrigin.Begin);
+            private readonly PEFile file;
+
+            internal PEOptionalHeaderInts(PEFile file) => this.file = file;
+
+            private void SetOptHeaderIntPos(uint ofs)
+            {
+                // 0x18: Signature + IMAGE_FILE_HEADER
+                file.earlyHeaderMS.Seek(file.NtHeaders + 0x18 + ofs, SeekOrigin.Begin);
+            }
+
+            /// <summary>
+            /// Gets or sets a field in the optional header.
+            /// </summary>
+            /// <param name="ofs">offset of field</param>
+            /// <returns>value of field</returns>
+            public uint this[uint ofs]
+            {
+                get
+                {
+                    SetOptHeaderIntPos(ofs);
+                    return file.earlyHeaderReader.ReadUInt32();
+                }
+                set
+                {
+                    SetOptHeaderIntPos(ofs);
+                    file.earlyHeaderWriter.Write(ofs);
+                }
+            }
         }
 
         /// <summary>
-        /// Gets an integer from the optional header.
+        /// <see cref="PEOptionalHeaderInts"/> instance for getting or setting integer fields in the optional header.
         /// </summary>
-        /// <param name="ofs">offset from optional header start</param>
-        /// <returns>integer at offset</returns>
-        public uint GetOptionalHeaderInt(uint ofs)
-        {
-            SetOptHeaderIntPos(ofs);
-            return earlyHeaderReader.ReadUInt32();
-        }
+        public PEOptionalHeaderInts OptionalHeaderInts { get; private set; }
 
         /// <summary>
-        /// Sets an integer from the optional header to a new value.
+        /// Image base.
         /// </summary>
-        /// <param name="ofs">offset from optional header start</param>
-        /// <param name="v">new value</param>
-        public void SetOptionalHeaderInt(uint ofs, uint v)
-        {
-            SetOptHeaderIntPos(ofs);
-            byte[] numBuf = BitConverter.GetBytes(v);
-            earlyHeaderMS.Write(numBuf, 0, numBuf.Length);
-        }
+        public uint ImageBase => OptionalHeaderInts[0x1C];
+
+        /// <summary>
+        /// Section alignment.
+        /// </summary>
+        public uint SectionAlignment => OptionalHeaderInts[0x20];
+
+        /// <summary>
+        /// File alignment.
+        /// </summary>
+        public uint FileAlignment => OptionalHeaderInts[0x24];
+
+        /// <summary>
+        /// Header size.
+        /// </summary>
+        public uint HeaderSize => OptionalHeaderInts[0x3C];
 
         /// <summary>
         /// Creates a <see cref="MemoryStream"/> using the specified RVA point.
@@ -355,7 +382,7 @@ namespace PEHandler
             get
             {
                 int idx = 0;
-                uint rsrcRVA = GetOptionalHeaderInt(0x70);
+                uint rsrcRVA = OptionalHeaderInts[0x70];
                 foreach (Section s in Sections)
                 {
                     if (s.VirtualAddress == rsrcRVA)
@@ -391,7 +418,6 @@ namespace PEHandler
         /// <param name="resortSections">wheter to resort the section list after adding the section</param>
         public void Malloc(Section newS, bool resortSections = true)
         {
-            uint sectionAlignment = GetOptionalHeaderInt(0x20);
             Section rsrcSection = null;
             int rsI = ResourcesIndex;
             if (rsI != -1)
@@ -399,17 +425,18 @@ namespace PEHandler
                 rsrcSection = Sections.ElementAt(rsI);
                 Sections.RemoveAt(rsI);
             }
-            MallocInterior(newS, (uint)earlyHeader.Length, sectionAlignment);
+            MallocInterior(newS, (uint)earlyHeader.Length, SectionAlignment);
             Sections.Add(newS);
             if (rsrcSection != null)
             {
                 // rsrcSection has to be the latest section in the file
                 uint oldResourcesRVA = rsrcSection.VirtualAddress;
-                MallocInterior(rsrcSection, ImageSize, sectionAlignment);
+                MallocInterior(rsrcSection, ImageSize, SectionAlignment);
                 uint newResourcesRVA = rsrcSection.VirtualAddress;
                 rsrcSection.ShiftResourceContents((int)(newResourcesRVA - oldResourcesRVA));
                 Sections.Add(rsrcSection);
-                SetOptionalHeaderInt(0x70, newResourcesRVA);
+                OptionalHeaderInts[0x70] = newResourcesRVA;
+                OptionalHeaderInts[0x74] = rsrcSection.VirtualSize;
             }
             if (resortSections)
                 Sections.OrderBy(x => x);
@@ -505,7 +532,6 @@ namespace PEHandler
             RemoveFillerSections();
             // sort sections
             Sections.OrderBy(x => x);
-            uint sectionAlignment = GetOptionalHeaderInt(0x20);
             uint flrNum = 0;
             uint lastAddr = 0;
             List<Section> secsToMalloc = new List<Section>();
@@ -518,7 +544,7 @@ namespace PEHandler
                     if (s.VirtualAddress != lastAddr)
                         // create new filler section
                         secsToMalloc.Add(CreateFillerSection(flrNum++, lastAddr, s.VirtualAddress - lastAddr));
-                lastAddr = AlignForward(s.VirtualAddress + s.VirtualSize, sectionAlignment);
+                lastAddr = AlignForward(s.VirtualAddress + s.VirtualSize, SectionAlignment);
             }
             // malloc the new filler sections
             foreach (Section s in secsToMalloc)
@@ -773,7 +799,7 @@ namespace PEHandler
                 set
                 {
                     if (value == null)
-                        throw new ArgumentNullException("s");
+                        throw new ArgumentNullException(nameof(value));
                     byte[] data = Encoding.Default.GetBytes(value);
                     Array.Copy(data, tagData, 8);
                 }
@@ -904,38 +930,25 @@ namespace PEHandler
                 return 1;
             }
 
-            /// <summary>
-            /// Shifts a resource directory table by a specific amount.
-            /// </summary>
-            /// <param name="ms">data buffer</param>
-            /// <param name="amt">amount to shift by</param>
-            /// <param name="pointer">pointer to resource directory table</param>
             private void ShiftDirTable(MemoryStream ms, int amt, uint pointer)
-            {
-                using (BinaryReader r = new BinaryReader(ms, Encoding.UTF8, true))
-                {
-                    ms.Seek(pointer + 12, SeekOrigin.Begin);
-                    // get the # of rsrc subdirs indexed by name
-                    uint nEntry = r.ReadUInt16();
-                    // get the # of rsrc subdirs indexed by id
-                    nEntry += r.ReadUInt16();
-                    // read and shift entries
-                    uint pos = pointer + 16;
-                    for (uint i = 0; i < nEntry; i++)
-                        RsrcShift(ms, amt, pos + i * 8);
-                }
-            }
-
-            /// <summary>
-            /// Shifts a resource entry by a specific amount.
-            /// </summary>
-            /// <param name="ms">data buffer</param>
-            /// <param name="amt">amount to shift by</param>
-            /// <param name="pointer">pointer to resource entry</param>
-            private void RsrcShift(MemoryStream ms, int amt, uint pointer)
             {
                 BinaryReader r = new BinaryReader(ms, Encoding.UTF8, true);
                 BinaryWriter w = new BinaryWriter(ms, Encoding.UTF8, true);
+                ms.Seek(pointer + 12, SeekOrigin.Begin);
+                // get the # of rsrc subdirs indexed by name
+                uint nEntry = r.ReadUInt16();
+                // get the # of rsrc subdirs indexed by id
+                nEntry += r.ReadUInt16();
+                // read and shift entries
+                uint pos = pointer + 16;
+                for (uint i = 0; i < nEntry; i++)
+                    RsrcShift(ms, r, w, amt, pos + i * 8);
+                r.Dispose();
+                w.Dispose();
+            }
+
+            private void RsrcShift(MemoryStream ms, BinaryReader r, BinaryWriter w, int amt, uint pointer)
+            {
                 ms.Seek(pointer + 4, SeekOrigin.Begin);
                 uint rva = r.ReadUInt32();
                 if ((rva & 0x80000000) != 0) // if hi bit 1 points to another directory table
@@ -947,8 +960,6 @@ namespace PEHandler
                     ms.Seek(rva, SeekOrigin.Begin);
                     w.Write((uint)(oldVal + amt));
                 }
-                r.Dispose();
-                w.Dispose();
             }
 
             /// <summary>
@@ -957,7 +968,9 @@ namespace PEHandler
             /// <param name="amt">amount to shift by</param>
             internal void ShiftResourceContents(int amt)
             {
-                ShiftDirTable(new MemoryStream(RawData), amt, 0);
+                MemoryStream ms;
+                ShiftDirTable(ms = new MemoryStream(RawData), amt, 0);
+                ms.Close();
             }
 
             /// <summary>
